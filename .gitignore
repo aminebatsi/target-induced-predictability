@@ -1,0 +1,29 @@
+# Generated outputs. Everything under results/ is reproduced by run_all.py and
+# by the analysis modules, so none of it is tracked. artifacts/ IS tracked --
+# it holds the cached forecasts the analysis layer replays.
+results/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.python-version
+
+# Tooling
+.ipynb_checkpoints/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs and scratch
+*.log
+*.tmp

@@ -1,0 +1,23 @@
+# Tested with Python 3.11 and 3.12.
+numpy>=1.26
+pandas>=2.2
+scipy>=1.11
+scikit-learn>=1.4
+torch>=2.1
+xgboost>=2.0
+lightgbm>=4.0
+statsmodels>=0.14
+hmmlearn>=0.3          # regime_hmm.py only
+matplotlib>=3.8
+einops>=0.7            # required by the vendored Time-Series-Library models
+
+# The transformer-class models come from the upstream Time-Series-Library,
+# which is vendored under third_party/ rather than pip-installed so that the
+# commit is pinned:
+#
+#   git clone https://github.com/thuml/Time-Series-Library.git \
+#       third_party/Time-Series-Library
+#   cd third_party/Time-Series-Library && git checkout 4e938a1
+#
+# Its own requirements.txt is not needed. Only layers/ and models/ are imported,
+# which require torch and einops alone.
