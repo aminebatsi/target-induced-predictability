@@ -61,12 +61,7 @@ alone; the upstream `requirements.txt` is not required.
 
 ### GPU
 
-`models.DEVICE` selects CUDA automatically when it is available. To check what
-the machine will use:
-
-```bash
-python gpu_probe.py
-```
+`models.DEVICE` selects CUDA automatically when it is available.
 
 ---
 
@@ -104,11 +99,6 @@ Steps, in the order `run_all.py` executes them:
 | `filters` | `leakage_suite.py` | causality audit of all nine transforms | ~1 min |
 | `forecast` | `forecast.py` | per-model forecasts, `best_model.json` | **6–8 h CPU / <1 h T4** |
 | `horizons` | `horizons.py` | filter × horizon sweep | ~20 min |
-| `strategy` | `strategy.py` | portfolio, ablation arms, paired proofs | ~10 min |
-| `symmetry` | `reversal_symmetry.py` | matched-reversal identities | ~1 min |
-| `folds` | `fold_analysis.py` | per-fold diagnostics | ~2 min |
-| `years` | `year_analysis.py` | return attribution | ~2 min |
-| `voltarget` | `vol_target_sweep.py` | overlay surface and controls | ~5 min |
 | `export` | `export_results.py` | consolidated `results/paper_export/` | seconds |
 
 `sweep` (`sweep.py`) is excluded from `all` because it is hours of fitting on
@@ -136,15 +126,17 @@ exactly. `FORECAST_WORKERS=0` auto-sizes from available GPU memory.
 
 ### Regenerating the cached artefacts
 
-`artifacts/` is produced by the pipeline, not by hand. After a full run:
+`artifacts/` is produced by the pipeline, not by hand. After a full run, copy
+the per-model prediction CSVs from `results/paper_export/` to
+`artifacts/forecast_predictions/`.
 
-```bash
-python strategy_models.py          # writes the per-(fold, asset) component cache
-```
-
-then copy `results/strategy_models/_components.pkl` to
-`artifacts/strategy_components.pkl` and the per-model prediction CSVs from
-`results/paper_export/` to `artifacts/forecast_predictions/`.
+> **Note.** `artifacts/strategy_components.pkl` was written by
+> `strategy_models.py`, which belonged to the portfolio study and has been
+> removed from this repository. The cached `.pkl` is retained because
+> `excess_accuracy.py`, `block_sensitivity.py` and `verify_headline.py` read it
+> through `portfolio_replay.load_components()` for their portfolio-side
+> sections; those sections are not used by the manuscript, and the cache can no
+> longer be regenerated here.
 
 ---
 
@@ -155,38 +147,43 @@ and write to `results/analysis/`. Run them in this order — later modules read
 files written by earlier ones.
 
 ```bash
-python transform_sweep.py          # ~2 min   model-free transform x horizon sweep
-python predictive_ability.py       # ~4 min   SPA, reality check, Romano-Wolf
-python exposure_matching.py        # ~13 min  matched reversal, costs, deflated Sharpe
-python excess_accuracy.py          # ~6 min   ExDA, accuracy intervals, universe test
+python transform_sweep.py          # ~2 min   model-free transform x horizon sweep (Table 7, Fig 4)
+python synthetic_null.py           # ~3 min   200 random walks, same measurement (Table 8)
+python causal_wavelet.py           # ~4 min   causal vs full-sample wavelet (Table 9)
+python direction_baselines.py      # ~2 min   parameter-free rules, sign classifiers (Table 6)
+python raw_price_null.py           # ~3 min   independence-adjusted association (Table 5)
+python predictive_ability.py       # ~4 min   SPA, reality check, Romano-Wolf (Table 11)
+python excess_accuracy.py          # ~6 min   ExDA against B(rho_1) (Table 10)
+python equivalence_bounds.py       # ~3 min   upper bounds and MDE (Table 12)
+python asset_robustness.py         # ~1 min   per-asset, per-fold, leave-one-out
 python benchmark_residual.py       # ~10 s    where the sign-agreement benchmark fails
-python turn_exit_ablation.py       # ~3 min   pre-specified turn-classifier removal test
 python return_mechanism.py         # ~2 min   magnitude vs frequency decomposition
-python reversal_symmetry.py        # ~2 min   friction algebra of the matched reversal
-python strategy_proofs.py          # ~2 min   supporting per-fold and exposure tables
 python block_sensitivity.py        # ~10 min  bootstrap block lengths 10 / 20 / 40
+python three_truths_figure.py      # ~10 s    Figure 3
 ```
 
 Dependencies worth knowing:
 
 - `predictive_ability.py` needs `slope_daily_accuracy.csv` from
   `transform_sweep.py`.
-- `benchmark_residual.py` needs `slope_generality_sweep.csv` from
-  `transform_sweep.py`.
+- `benchmark_residual.py` and `synthetic_null.py` need
+  `slope_generality_sweep.csv` from `transform_sweep.py`.
 - `block_sensitivity.py` imports `excess_accuracy.py`, `return_mechanism.py`
   and `predictive_ability.py`.
+- `portfolio_replay.py` is a library, not an entry point. It supplies the
+  shared path constants and the stationary-bootstrap resampler
+  (`stationary_bootstrap_idx`, `nz_sign`) that the analysis modules above
+  import.
 
 ### Verification
 
 ```bash
-python verify_headline.py          # re-derives 20 headline numbers from cache
-python run_all.py symmetry         # matched-reversal identities, into ACCEPTANCE.md
-python verify_manuscript.py        # cross-checks the numbers against the LaTeX source
+python verify_headline.py          # re-derives the headline numbers from cache
 ```
 
 `verify_headline.py` exits non-zero if any headline figure fails to reproduce
-within tolerance. `verify_manuscript.py` additionally requires the manuscript
-sources at `../paper/manuscript.tex` and is skipped without them.
+within tolerance. It refits nothing, but it reads the analysis tables written by
+section 4 above as well as `artifacts/`, so run the analysis layer first.
 
 ---
 
@@ -200,22 +197,23 @@ filters.py             nine trend transforms, four causal and five not
 models.py              all model fits, plus the turn classifier
 tslib_adapter.py       adapter for the vendored Time-Series-Library models
 evaluation.py          splits, metrics, significance tests, bootstrap
-strategy.py            portfolio construction and the signal ablation
 run_all.py             pipeline orchestrator and acceptance checks
 
-portfolio_replay.py    replays the portfolio from cached components (library)
+portfolio_replay.py    shared library: paths, stationary bootstrap, sign helpers
 transform_sweep.py     ... analysis modules, see section 4
+synthetic_null.py
+causal_wavelet.py
+direction_baselines.py
+raw_price_null.py
 predictive_ability.py
-exposure_matching.py
 excess_accuracy.py
+equivalence_bounds.py
+asset_robustness.py
 benchmark_residual.py
-turn_exit_ablation.py
 return_mechanism.py
-reversal_symmetry.py
-strategy_proofs.py
 block_sensitivity.py
-verify_headline.py     verification entry points
-verify_manuscript.py
+three_truths_figure.py
+verify_headline.py     verification entry point
 
 artifacts/             cached forecasts the analysis layer replays (tracked)
 data/                  daily price series (tracked)

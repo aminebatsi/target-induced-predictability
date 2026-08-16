@@ -16,14 +16,14 @@ Steps:
     forecast   walk-forward forecast of the h-step Kalman-trend change for
                every model in config.MODELS; writes best_model.json
     horizons   the same three-truths comparison over filters x horizons
-    strategy   equal-weight portfolio plus the directional-signal ablation
-               (PRED / LONG / REGIME / FLIP / RANDOM) holding the execution
-               stack fixed and swapping only the directional call
-    symmetry   algebraic identities behind the exposure-matched reversal
-    folds      per-fold diagnostics
-    years      per-fold return attribution
-    voltarget  volatility-overlay parameter surface and controls
     export     consolidate every artefact into results/paper_export/
+
+The standalone analysis modules that produce the manuscript's remaining tables
+are run directly rather than through this orchestrator: transform_sweep.py,
+synthetic_null.py, causal_wavelet.py, direction_baselines.py, raw_price_null.py,
+excess_accuracy.py, predictive_ability.py, equivalence_bounds.py,
+asset_robustness.py, block_sensitivity.py and benchmark_residual.py, with
+verify_headline.py re-deriving the headline numbers from cached artefacts.
 
 See SETUP-README.md for the full run order, runtimes and hardware notes.
 """
@@ -107,39 +107,6 @@ def step_forecast():
           f"best mean DA {mean_da.max():.3f} > 0.55")
 
 
-def step_strategy():
-    import strategy
-    print("== STRATEGY (MCAP, kalman trend, curated equal-weight book, "
-          "book vol target; role of the prediction) ==")
-    R, P, F = strategy.run()
-    check("strategy.signals_complete", set(strategy.ORDER) <= set(R.index),
-          f"{len(strategy.ORDER)}/{len(strategy.ORDER)} ablation signals backtested "
-          f"(+ RANDOM(null))")
-    for name in ("PRED_vs_LONG", "PRED_vs_REGIME", "PRED_vs_FLIP"):
-        pr = P.loc[name]
-        check(f"strategy.proof.{name}", True,
-              f"dSharpe {pr['d_sharpe']:+.2f} CI [{pr['ci_lo']:+.2f},{pr['ci_hi']:+.2f}] "
-              f"(certified={pr['ci_lo'] > 0})")
-    pr_flip = P.loc["PRED_vs_FLIP"]
-    check("strategy.flip_significance", pr_flip["ci_lo"] > 0,
-          f"PRED vs FLIP dSharpe CI [{pr_flip['ci_lo']:+.2f},{pr_flip['ci_hi']:+.2f}] "
-          f"entirely above zero -- the prediction's sign carries real information")
-    pr_vt = P.loc["PRED_vs_NOSCALE"]
-    check("strategy.book_vol_target", pr_vt["ci_lo"] > 0,
-          f"book vol target dSharpe {pr_vt['d_sharpe']:+.2f} "
-          f"CI [{pr_vt['ci_lo']:+.2f},{pr_vt['ci_hi']:+.2f}] vs the same signal "
-          f"un-throttled (p_ddev {pr_vt['p_ddev']:.3f}, p_cvar {pr_vt['p_cvar']:.3f})")
-
-    # The blend is bought to cut regime dependence, not to raise pooled Sharpe
-    # (it lowers it). Check it against what it is actually for.
-    b_std, p_std = F.loc["BLEND", "std_fold"], F.loc["PRED", "std_fold"]
-    check("strategy.blend_cuts_regime_dependence", b_std < p_std,
-          f"cross-fold Sharpe dispersion {p_std:.2f} (PRED) -> {b_std:.2f} (BLEND)")
-    b_min = F.loc["BLEND", "min_fold"]
-    check("strategy.blend_all_folds_positive", b_min > 0,
-          f"worst fold Sharpe {b_min:+.2f} (PRED alone: {F.loc['PRED', 'min_fold']:+.2f})")
-
-
 def step_check(step_name=None):
     """Merge this step's checks into the cache and re-render ACCEPTANCE.md.
 
@@ -174,38 +141,12 @@ def step_check(step_name=None):
     return bool(records) and n_ok == len(records)
 
 
-def step_folds():
-    import fold_analysis
-    print("== FOLD ANALYSIS (per-fold diagnostics) ==")
-    S, D = fold_analysis.run()
-    check("folds.complete", len(S) == len(D) > 0,
-          f"{len(S)} folds diagnosed")
-
-
-def step_voltarget():
-    import vol_target_sweep
-    print("== VOL-TARGET AUDIT (parameter stability + controls) ==")
-    S1, S2, C = vol_target_sweep.run()
-    base = float(C.loc["baseline (no overlay)", "sharpe"])
-    n_better = int((S1.values > base).sum())
-    check("voltarget.plateau", n_better == S1.size,
-          f"{n_better}/{S1.size} grid cells beat the {base:.2f} baseline")
-
-
 def step_design():
     import design_figure
     print("== DESIGN FIGURE (walk-forward splits, purge, embargo) ==")
     S = design_figure.run()
     check("design.folds", len(S) == len(FOLDS),
           f"{len(S)}/{len(FOLDS)} folds rendered with train/val/embargo/test spans")
-
-
-def step_years():
-    import year_analysis
-    print("== YEAR ANALYSIS (per-fold return attribution) ==")
-    Y = year_analysis.run()
-    check("years.attribution", len(Y) == len(FOLDS),
-          f"{len(Y)} folds decomposed into return, risk, legs, costs and market context")
 
 
 def step_filters():
@@ -273,34 +214,15 @@ def step_export():
               f"(standalone module not run) -- not an acceptance failure")
 
 
-def step_symmetry():
-    """The exposure-matched reversal rests on PRED and FLIP holding exactly
-    opposite positions. That is an algebraic property of the execution stack, so
-    it is asserted rather than trusted: positions must negate exactly, gross
-    returns with them, and the net asymmetry must be fully explained by the
-    common turnover cost. Skipped quietly if the components cache is absent."""
-    print("== MATCHED-REVERSAL SYMMETRY ==")
-    try:
-        import reversal_symmetry
-        for name, ok, detail in reversal_symmetry.acceptance_checks():
-            check(name, ok, detail)
-    except FileNotFoundError:
-        print("  [note] components cache absent -- run strategy_models.py first; "
-              "not an acceptance failure")
-
-
 STEPS = {"data": step_data, "integrity": step_integrity,
          "design": step_design, "purge": step_purge, "leakage": step_leakage,
          "filters": step_filters, "forecast": step_forecast,
          "horizons": step_horizons, "sweep": step_sweep,
-         "strategy": step_strategy, "symmetry": step_symmetry,
-         "folds": step_folds, "years": step_years, "voltarget": step_voltarget,
          "export": step_export}
 
-# Excluded from `all` because each is hours of fitting on its own, and neither
-# is needed for the headline results. Run them by name when you want them.
-#   sweep            11 models x 4 causal filters x 3 horizons = 3300 cells
-#   strategy_models  refits every model over the portfolio universe
+# Excluded from `all` because it is hours of fitting on its own and is not
+# needed for the headline results. Run it by name when you want it.
+#   sweep   11 models x 4 causal filters x 3 horizons = 3300 cells
 LONG_STEPS = {"sweep"}
 
 if __name__ == "__main__":

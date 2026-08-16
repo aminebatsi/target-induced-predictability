@@ -74,11 +74,13 @@ its own licence; see that directory.
 
 ## Verification
 
-Three entry points re-derive the reported numbers from the cached artefacts and
-fail loudly on drift:
+Two entry points re-derive the reported numbers and fail loudly on drift:
 
 ```bash
-python verify_headline.py      # 20 headline figures, from cache
+python verify_headline.py      # 20 headline figures
 python run_all.py symmetry     # matched-reversal algebraic identities
-python verify_manuscript.py    # cross-check against the LaTeX source
 ```
+
+`verify_headline.py` refits nothing, but it reads the analysis-layer tables in
+`results/analysis/` as well as `artifacts/`, so run the analysis layer first
+(SETUP-README, section 4).

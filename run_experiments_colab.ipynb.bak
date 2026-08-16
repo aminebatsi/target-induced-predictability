@@ -7,7 +7,7 @@
     "# Predictable Trends, Unpredictable Prices\n",
     "## Full experimental pipeline — Google Colab runner\n",
     "\n",
-    "Runs every experiment behind the manuscript end to end and packages the results.\n",
+    "Runs every experiment end to end and packages the results for paper writing.\n",
     "\n",
     "> **Before you start:** *Runtime → Change runtime type → GPU* (T4 suffices).\n",
     "> Thirteen models are trained; on CPU that is most of a day, on GPU a couple\n",
@@ -18,23 +18,20 @@
     "| § | Step | Output |\n",
     "|---|---|---|\n",
     "| 1 | Environment, GPU, clone Time-Series-Library | — |\n",
-    "| 2 | **Data collection** (Yahoo / yfinance) | `results/design/` |\n",
+    "| 2 | **Data collection** (Yahoo / yfinance): forecast + portfolio universes | `results/design/` |\n",
     "| 3 | **Splits and folds** — walk-forward design figure | `results/design/` |\n",
-    "| 4 | **Kalman filter + causality audit** with plots | `results/leakage/` |\n",
+    "| 4 | **Kalman filter + leakage audit** with plots | `results/leakage/` |\n",
     "| 5 | **Training** — 13 models incl. LSTM, DLinear, TimeFilter | `results/forecast/` |\n",
-    "| 6 | **Result analysis** + 12 prediction windows of one model | `results/forecast/` |\n",
-    "| 7 | **Export** — every table, figure, prediction and `STEPS.md` | `results/paper_export/` |\n",
+    "| 6 | **Deep result analysis** + 12 prediction windows of the best model | `results/forecast/` |\n",
+    "| 7 | **Strategy** on the best 4 models (MCAP, blended signal) | `results/strategy*/` |\n",
+    "| 8 | **Per-year return attribution** — why each year was good or bad | `results/year_analysis/` |\n",
+    "| 9 | **FLIP ablation** — reverse the model's call | `results/strategy/` |\n",
+    "| 10 | **Export** — every table, figure, prediction and `STEPS.md` | `results/paper_export/` |\n",
     "\n",
-    "Everything lands in `results/`, and the final section produces a single archive\n",
-    "to download.\n",
+    "Everything lands in `results/`, and §10 produces a single archive to download.\n",
     "\n",
     "**The long step (§5) is resumable** — if Colab disconnects, re-run the cell and\n",
-    "it continues from the last finished model instead of starting over.\n",
-    "\n",
-    "> The model-free analysis modules (`transform_sweep.py`, `synthetic_null.py`,\n",
-    "> `causal_wavelet.py`, `predictive_ability.py`, and the rest listed in\n",
-    "> `SETUP-README.md` §4) refit nothing and run in minutes on CPU. Run them\n",
-    "> locally after downloading `results/`.\n"
+    "it continues from the last finished model instead of starting over."
    ]
   },
   {
@@ -634,15 +631,27 @@
    ]
   },
   {
+   "cell_type": "code",
+   "metadata": {},
+   "execution_count": null,
+   "outputs": [],
+   "source": [
+    "# What does one fit actually cost on this card, and how many fit alongside it?\n",
+    "import subprocess, sys\n",
+    "print(subprocess.run([sys.executable, \"gpu_probe.py\"], cwd=str(PROJ),\n",
+    "                     capture_output=True, text=True).stdout)"
+   ]
+  },
+  {
    "cell_type": "markdown",
    "metadata": {},
    "source": [
-    "Pick the worker count for your card. A T4 usually lands on 8 to 12.\n",
+    "Pick the worker count from the probe above. A T4 usually lands on 8 to 12.\n",
     "\n",
     "Two things to expect. Scaling is sub-linear: the first few workers help a lot\n",
     "because they hide launch latency, later ones less as the SMs fill. And the\n",
     "`--filters causal --horizons 3,7,14` default is 3300 cells; start with a smaller\n",
-    "slice if you want to see the shape of the result before committing the hours.\n"
+    "slice if you want to see the shape of the result before committing the hours."
    ]
   },
   {
@@ -651,7 +660,7 @@
    "execution_count": null,
    "outputs": [],
    "source": [
-    "WORKERS   = 0           # 0 = auto-size from GPU memory\n",
+    "WORKERS   = 0           # 0 = auto-size from GPU memory (see the probe above)\n",
     "FILTERS   = \"causal\"    # \"causal\" (4), \"all\" (9), or e.g. \"kalman,ema\"\n",
     "HORIZONS  = \"3,7,14\"\n",
     "\n",
@@ -714,7 +723,196 @@
    "metadata": {},
    "source": [
     "---\n",
-    "## 7. Export everything\n",
+    "## 7. Strategy\n",
+    "\n",
+    "Equal-weight book over the 10 portfolio assets. Execution stack, in order:\n",
+    "SMA-200 regime gate → turn-classifier exit (threshold chosen on **validation**)\n",
+    "→ causal per-asset volatility target → 60/40 blend of prediction and regime\n",
+    "signal → book-level volatility target. Costs: **10 bps per side** on every\n",
+    "position change, plus **10% p.a.** funding on short crypto."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "run_step(\"strategy\")\n",
+    "ST = PROJ / \"results\" / \"strategy\"\n",
+    "print(\"\\nPooled results by signal arm\\n\")\n",
+    "display(pd.read_csv(ST / \"ablation.csv\").round(3))\n",
+    "print(\"\\nPer-fold Sharpe\\n\")\n",
+    "display(pd.read_csv(ST / \"fold_sharpe.csv\", index_col=0).round(3))\n",
+    "show_fig(\"strategy/equity_mcap.png\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "run_step(\"folds\")\n",
+    "show_fig(\"fold_analysis/fold_signal_sharpe.png\")\n",
+    "show_fig(\"fold_analysis/fold_gross_vs_net.png\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### 7b. Strategy on the best four models\n",
+    "\n",
+    "Takes the **four best forecasters by direction accuracy** — read from the\n",
+    "forecast results, not hardcoded — and runs each through the *identical*\n",
+    "execution stack, reporting the blended (`BLEND`) and unblended (`PRED`) arms\n",
+    "plus the `FLIP` ablation and a permutation null per model.\n",
+    "\n",
+    "This answers a question the accuracy table cannot: **is direction accuracy a\n",
+    "useful criterion for choosing a trading signal?**\n",
+    "\n",
+    "> Expensive — it refits each model over the 10-asset portfolio universe.\n",
+    "> Fits are cached, so re-running to add an arm is free."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "RUN_MODEL_STRATEGY = True     # set False to skip\n",
+    "\n",
+    "if RUN_MODEL_STRATEGY:\n",
+    "    p = subprocess.Popen([sys.executable, \"strategy_models.py\"],\n",
+    "                         env=dict(os.environ, PYTHONUNBUFFERED=\"1\"),\n",
+    "                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,\n",
+    "                         text=True, bufsize=1)\n",
+    "    for line in p.stdout:\n",
+    "        print(line, end=\"\")\n",
+    "    p.wait()\n",
+    "    show_fig(\"strategy_models/equity_pred_flip.png\")\n",
+    "    show_fig(\"strategy_models/ablation_pred_flip.png\")\n",
+    "else:\n",
+    "    print(\"skipped\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "---\n",
+    "## 8. Per-year return attribution\n",
+    "\n",
+    "Sharpe hides the two things that produce it. A weak fold can mean the strategy\n",
+    "earned nothing (**numerator**) or earned normally while carrying far more risk\n",
+    "(**denominator**) — and the remedies are opposite. Each fold is therefore split\n",
+    "into return, volatility, long and short leg contributions, cost drag, and the\n",
+    "*market context*: what the assets themselves did, how correlated they were, how\n",
+    "cleanly they trended, and how many were profitable.\n",
+    "\n",
+    "Market-context columns are properties of the **data**, not the strategy, so a\n",
+    "bad year can be attributed to a hostile market — or not, which is the more\n",
+    "serious finding."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "run_step(\"years\")\n",
+    "YA = PROJ / \"results\" / \"year_analysis\"\n",
+    "Y = pd.read_csv(YA / \"year_attribution.csv\", index_col=0)\n",
+    "print(\"Return and risk by fold\\n\")\n",
+    "display(Y[[\"return_pct\", \"ann_vol\", \"sharpe\", \"max_dd_pct\"]].round(2))\n",
+    "print(\"\\nWhere the return came from (%)\\n\")\n",
+    "display(Y[[\"long_leg_pct\", \"short_leg_pct\", \"cost_drag_pct\", \"turnover\"]].round(2))\n",
+    "print(\"\\nWhat the market was doing (properties of the data)\\n\")\n",
+    "display(Y[[\"asset_drift_pct\", \"asset_dispersion\", \"asset_ann_vol\",\n",
+    "           \"avg_pair_corr\", \"trend_efficiency\", \"breadth\"]].round(3))\n",
+    "show_fig(\"year_analysis/year_attribution.png\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Generated per-fold narrative — why each year was good or bad\n",
+    "display(Markdown((YA / \"year_read.md\").read_text(encoding=\"utf-8\")))"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "---\n",
+    "## 9. FLIP ablation\n",
+    "\n",
+    "The decisive test of whether the model's *sign* carries information. The whole\n",
+    "execution stack is held fixed and **only the directional call is replaced**:\n",
+    "\n",
+    "| arm | signal |\n",
+    "|---|---|\n",
+    "| `PRED` | $\\mathrm{sign}(\\hat y_t)$ — the model's call |\n",
+    "| `FLIP` | $-\\mathrm{sign}(\\hat y_t)$ — the exact inverse |\n",
+    "| `LONG` | $+1$ always |\n",
+    "| `REGIME` | the SMA-200 state, no ML |\n",
+    "| `RANDOM` | random $\\pm 1$, 20 draws (permutation null) |\n",
+    "\n",
+    "If the prediction has real directional content, reversing it must **hurt**.\n",
+    "Comparisons use a paired stationary bootstrap on identical days, so both arms\n",
+    "see the same resample indices."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "abl = pd.read_csv(ST / \"ablation.csv\")\n",
+    "pp = pd.read_csv(ST / \"paired_proofs.csv\", index_col=0)\n",
+    "display(abl.round(3))\n",
+    "print(\"\\nPaired stationary bootstrap (800 resamples, mean block 20 days)\\n\")\n",
+    "display(pp.round(3))\n",
+    "\n",
+    "if \"PRED_vs_FLIP\" in pp.index:\n",
+    "    r = pp.loc[\"PRED_vs_FLIP\"]\n",
+    "    verdict = (\"entirely above zero — the sign carries real information\"\n",
+    "               if r.ci_lo > 0 else \"straddles zero — not demonstrated\")\n",
+    "    print(f\"\\nPRED vs FLIP: dSharpe {r.d_sharpe:+.3f}, 95% CI \"\n",
+    "          f\"[{r.ci_lo:+.3f}, {r.ci_hi:+.3f}] -> {verdict}\")\n",
+    "\n",
+    "show_fig(\"strategy/ablation_bars.png\")\n",
+    "show_fig(\"strategy/ablation_equity.png\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Caveat worth stating in the paper: the regime gate clamps direction, so\n",
+    "# flipping the prediction converts LONG exposure into FLAT exposure in bull\n",
+    "# regimes rather than into short exposure. The PRED-FLIP gap therefore partly\n",
+    "# measures forgone beta, not purely signal skill.\n",
+    "run_step(\"voltarget\")\n",
+    "show_fig(\"vol_target/parameter_surfaces.png\")\n",
+    "display(pd.read_csv(PROJ / \"results\" / \"vol_target\" / \"controls.csv\").round(3))"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "---\n",
+    "## 10. Export everything\n",
     "\n",
     "Consolidates every table, figure and row-level file into `results/paper_export/`\n",
     "with a `MANIFEST.csv`, a `config_snapshot.json`, an `environment.json`, and\n",

@@ -7,7 +7,7 @@ torch>=2.1
 xgboost>=2.0
 lightgbm>=4.0
 statsmodels>=0.14
-hmmlearn>=0.3          # regime_hmm.py only
+PyWavelets>=1.5        # causal_wavelet.py (causal vs full-sample denoising)
 matplotlib>=3.8
 einops>=0.7            # required by the vendored Time-Series-Library models
 
